@@ -1,0 +1,6 @@
+O programa deve ter uma CLI que suporte dois comandos : 
+add <ip> <weight>
+del <ip>
+trace <ip>
+
+parâmetros ADDR,PERIOD e STARTUP
