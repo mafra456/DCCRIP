@@ -54,7 +54,7 @@ def updateMessage(source,dest,distances):
     return update_message.encode('latin1')
 
 def dataMessage(source,dest):
-    message = {'type':'data', 'source':source, 'destination':dest, 'payload':'data'+'\'+ source + '\' + destination}
+    message = {'type':'data', 'source':source, 'destination':dest, 'payload':'data'+'\'+ source + '\' + dest}
     data_message = json.dumps(message)
     #print(data_message)
     return data_message.encode('latin1')
