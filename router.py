@@ -17,7 +17,9 @@ def _add(args, sourceIP):
     dest = args[0]
     cost = int(args[1])
     DVTable.append([sourceIP, cost, dest])
+    DVTable.append([dest, cost, sourceIP])
     graph[sourceIP].update({dest: cost})
+    graph[dest].update({sourceIP: cost})
     print(DVTable)
     print(graph)
 
@@ -52,7 +54,7 @@ def updateMessage(source,dest,distances):
     return update_message.encode('latin1')
 
 def dataMessage(source,dest):
-    message = {'type':'data', 'source':source, 'destination':dest, 'distances':distances}
+    message = {'type':'data', 'source':source, 'destination':dest, 'payload':'data'+'\'+ source + '\' + destination}
     data_message = json.dumps(message)
     #print(data_message)
     return data_message.encode('latin1')
