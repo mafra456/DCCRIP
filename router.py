@@ -15,13 +15,16 @@ global DVTable
 def _add(sourceIP, cost, dest, nextStep):
     #graph_comment global DVTable,graph
     global DVTable
-    
+
+    # Mantemos essa variável p sermos capazes de identificar rotas desatualizadas.
+    _record_updated_at = int(round(time.time()))
+
     cost = int(cost)
-    DVTable.append([sourceIP, cost, dest, nextStep])
-    # Só adicionamos na oposta caso o destino não seja igual ao próximo passo.
-    # Nesse caso, não é uma ligação direta e não sabemos se o caminho inverso é o melhor para o outro.
-    if(nextStep != dest):
-        DVTable.append([dest, cost, sourceIP, sourceIP])
+    DVTable.append([sourceIP, cost, dest, nextStep, _record_updated_at])
+    # Só adicionamos na oposta caso o destino seja igual ao próximo passo.
+    # Nesse caso, é uma ligação direta e sabemos q o caminho inverso é o melhor para o outro.
+    if(nextStep == dest):
+        DVTable.append([dest, cost, sourceIP, sourceIP, _record_updated_at])
 #graph_comment     graph[sourceIP].update({dest: cost})
 #graph_comment     graph[dest].update({sourceIP: cost})
 
@@ -81,9 +84,17 @@ def broadcastDV(TOUT,PORT): #Envia mensagem do tipo update de tempos em tempos
     global DVTable
     broadcast = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, 0)
     lock.acquire()
-    distances = {dist[2]:dist[1] for dist in DVTable}
-    for dist in DVTable:  #Enviando msg a todos os vizinhos
-        broadcast.sendto(updateMessage(dist[0],dist[2], distances), (dist[2], PORT))
+
+    # Crio minha tabela de distancias
+#    distances = {dist[2]:dist[1] for dist in DVTable}
+
+    # Crio e envio tabela todos os meus vizinhos
+    for _broadcastSource, _cost, _broadcastDestination, _nextStep in DVTable: 
+        # Não incluímos rotas para _broadcastDestination nem rotas que tem ela como next step. Split Horizon.
+        distances = [vizinho[2]:vizinho[1] for line in DVTable if vizinho[2] != _broadcastDestination && vizinho[3] != _broadcastDestination]
+        # TODO TEST.
+        print("Distances: {}".format(distances))
+        broadcast.sendto(updateMessage(_broadcastSource, _broadcastDestination, distances), (_broadcastDestination, PORT))
     threading.Timer(int(TOUT),broadcastDV, args=(int(TOUT),PORT)).start()
     lock.release()
     broadcast.close()
@@ -98,57 +109,81 @@ def pathCost(sourceIP, dest):
     #graph_comment global graph
     #bellmanFord algorithm
 
+# !!!  Essa função só deve ser utilizada entre nós vizinhos.
+def getCustoVizinho(source, dest):
+    global DVTable
+    for _source, _cost, _dest, _nextStep in DVTable:
+        if source == _source && dest == _dest:
+            return _cost 
+
+def getNextStep(source, dest):
+    global DVTable
+    for _source, _cost, _dest, _nextStep in DVTable:
+        if source == _source && dest == _dest:
+            return _nextStep 
+
+def getTableLine(source, dest):
+    global DVTable
+    for idx, line in enumerate(DVTable):
+        _source, _cost, _dest, _nextStep = line
+        if(_source == source && _dest == dest):
+            return DVTable[idx]
+
+def updatePath(source, newCost, dest, newNextStep):
+    global DVTable
+    for idx, line in enumerate(DVTable):
+        _source, _cost, _dest, _nextStep = line
+        if(_source == source && _dest == dest):
+            _current_time_in_seconds = int(round(time.time()))
+            DVTable[idx] = [source, newCost, dest, newNextStep, _current_time_in_seconds]
+
 def bellmanFord():
     print('')
 
 
 # Recebemos o anuncio`1             
-def update_table(js):
+def receive_update(js):
+    global DVTable
+
+    # Os vizinhos deste roteador
+    _meus_vizinhos = np.array(DVTable)[:,2]
+
     # Anunciante
-    _source = js["source"]
+    _anunciante = js["source"]
 
     # Eu
-    _destination = js["destination"]
+    _receiver = js["destination"]
 
     # Endereços conectados no anunciante
     _distances = js["distances"]
 
+    _custo_vizinho_anunciante = getCustoVizinho(_receiver, _anunciante)
+    
+
+    print("Receiver: {} Anunciante: {} Custo Vizinho Anunciante: {}".format(_receiver, _anunciante, _custo_vizinho_anunciante))
     # Para cada vizinho no anuncio recebido
     for destino, custo in _distances.items():
-        # Se o destino não está na tabela
-        if(destino not in matrixDV[:,2]):
-            #graph_comment #graph.update({js['source']:{d:js['destination'][d]}})
-            _add(key,_destination[key], _source)
+        if(destino not in _meus_vizinhos):
+            # Destino não está na tabela
+            _add(_receiver, _custo_vizinho_anunciante + custo, destino, _anunciante)
         else:
-            for t in DVTable:
-                for key,val in _distances.items():
-                    if(t[2] == key):
-                        pass
-                        #Comparo para ver se o novo caminho é melhor (pathCost é o bellmanFord - caminho minimo no grafo)
-                        #if(t[1] > js['distances'][d] + pathCost(HOST,js['source']))
+            _linha_receiver_destino = getTableLine(_receiver, destino)
+             _custo_atual = _linha_receiver_destino[1]
+            _nextStep_destino = _linha_receiver_destino[3]
 
-
-
-
-
-for destino, custo in _distances.items():
-        if(key not in matrixDV[:,2]):
-            #graph_comment #graph.update({js['source']:{d:js['destination'][d]}})
-            _add(key,_destination[key], _source)
-        else:
-            for t in DVTable:
-                for key,val in _distances.items():
-                    if(t[2] == key):
-                        pass
-                        #Comparo para ver se o novo caminho é melhor (pathCost é o bellmanFord - caminho minimo no grafo)
-                        #if(t[1] > js['distances'][d] + pathCost(HOST,js['source']))
-
+            # Vale a pena atualizar o destino?
+            if(_custo_vizinho_anunciante + custo  < _custo_atual):
+                updatePath(_receiver, _custo_vizinho_anunciante + custo, destino, _anunciante)
+            else:
+                # Se o próximo passo para o destino já é o anunciante, atualizamos para o valor recebido
+                if(_nextStep_destino == _anunciante):
+                    updatePath(_receiver, _custo_vizinho_anunciante + custo, destino, _anunciante)
 
 
 
 def listen(HOST,PORT):
     #graph_comment global DVTable,graph
-    global DVTable
+
     listenSocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, 0)
     listenSocket.bind((HOST,PORT))
     while True:
@@ -157,9 +192,8 @@ def listen(HOST,PORT):
         print(message)
         js = json.loads(message)
         _type = js["type"]
-        matrixDV = np.array(DVTable)
         if(_type == 'update'):
-            update_table(js)
+            receive_update(js)
             
         elif(_type == 'data'):
             pass
@@ -181,8 +215,19 @@ def CLI(sourceIP):
         print("Termino da Execucao")
         os._exit(1)
 
+
+def remove_rotas_desatualizadas(period):
+    while True:
+        global DVTable
+        for idx, line in enumerate(DVTable):
+            _record_updated_at = line[4]
+            _current_time_in_seconds = int(round(time.time()))
+            if _record_updated_at - _current_time_in_seconds > (period * 4):
+                del DVTable[idx]
+
+
+
 def main():
-    global DVTable
     global DVTable
     #graph_comment global graph
     t_start = time.time()
@@ -202,6 +247,7 @@ def main():
     threading.Thread(target=CLI, args=(HOST,)).start()
     threading.Timer(int(period),broadcastDV, args=(int(period),PORT)).start()
     threading.Thread(target=listen, args=(HOST,PORT)).start()
+    threading.Thread(target=remove_rotas_desatualizadas, args=(period,)).start()
 
     
 #python3 router.py 127.0.0.1 5 file.txt
