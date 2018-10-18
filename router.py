@@ -12,7 +12,6 @@ lock = threading.Lock()
 #graph_comment global DVTable,graph
 global DVTable
 
-
 def _add(sourceIP, cost, dest, nextStep):
     #graph_comment global DVTable,graph
     global DVTable
@@ -25,6 +24,7 @@ def _add(sourceIP, cost, dest, nextStep):
         DVTable.append([dest, cost, sourceIP, sourceIP])
 #graph_comment     graph[sourceIP].update({dest: cost})
 #graph_comment     graph[dest].update({sourceIP: cost})
+
     print(DVTable)
     #graph_comment print(graph)
 
