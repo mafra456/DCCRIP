@@ -6,14 +6,14 @@ import numpy as np
 import json
 import threading
 import math
+import argparse
+
 from collections import defaultdict
 
 lock = threading.Lock()
-#graph_comment global DVTable,graph
 global DVTable
 
 def _add(sourceIP, cost, dest, nextStep):
-    #graph_comment global DVTable,graph
     global DVTable
 
     # Mantemos essa variável p sermos capazes de identificar rotas desatualizadas.
@@ -23,26 +23,20 @@ def _add(sourceIP, cost, dest, nextStep):
     DVTable.append([sourceIP, cost, dest, nextStep, _record_updated_at])
     # Só adicionamos na oposta caso o destino seja igual ao próximo passo.
     # Nesse caso, é uma ligação direta e sabemos q o caminho inverso é o melhor para o outro.
-    if(nextStep == dest):
-        DVTable.append([dest, cost, sourceIP, sourceIP, _record_updated_at])
-#graph_comment     graph[sourceIP].update({dest: cost})
-#graph_comment     graph[dest].update({sourceIP: cost})
+    #if(nextStep == dest):
+    #    DVTable.append([dest, cost, sourceIP, sourceIP, _record_updated_at])
 
     print(DVTable)
-    #graph_comment print(graph)
 
 def _del(args, sourceIP):
-    #graph_comment global DVTable,graph
     global DVTable
     dest = args[0]
     for i in range(len(DVTable)):
         if(DVTable[i][2] == dest):
             #DVTable.remove([sourceIP,DVTable[i][1],dest])
             del DVTable[i]
-#graph_comment             graph[sourceIP][dest] = math.inf
 
 def _trace(args):#Enviam mensagem to tipo data e trace
-    #graph_comment global DVTable,graph
     global DVTable
     print('')
 
@@ -80,7 +74,6 @@ def traceMessage():
     return trace_message.encode('latin1')
 
 def broadcastDV(TOUT,PORT): #Envia mensagem do tipo update de tempos em tempos
-    #graph_comment global DVTable,graph
     global DVTable
     broadcast = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, 0)
     lock.acquire()
@@ -100,13 +93,11 @@ def broadcastDV(TOUT,PORT): #Envia mensagem do tipo update de tempos em tempos
     broadcast.close()
 
 def createDVTable(HOST):
-    #graph_comment global DVTable,graph
     global DVTable
     DVTable = []
     return DVTable, HOST
 
 def pathCost(sourceIP, dest):
-    #graph_comment global graph
     #bellmanFord algorithm
 
 # !!!  Essa função só deve ser utilizada entre nós vizinhos.
@@ -182,7 +173,6 @@ def receive_update(js):
 
 
 def listen(HOST,PORT):
-    #graph_comment global DVTable,graph
 
     listenSocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, 0)
     listenSocket.bind((HOST,PORT))
@@ -216,6 +206,7 @@ def CLI(sourceIP):
         os._exit(1)
 
 
+'''
 def remove_rotas_desatualizadas(period):
     while True:
         global DVTable
@@ -224,30 +215,58 @@ def remove_rotas_desatualizadas(period):
             _current_time_in_seconds = int(round(time.time()))
             if _record_updated_at - _current_time_in_seconds > (period * 4):
                 del DVTable[idx]
+'''
 
 
+
+def parse_args():
+    parser = argparse.ArgumentParser(description = "Parser de argumentos")
+
+    parser.add_argument("--addr", help = "Endereço do roteador", required = False, default = "")
+    parser.add_argument("--update-period", help = "Período de atualização", required = False, default = "")
+    parser.add_argument("--startup-commands", help = "Comandos de inicialização", required = False, default = "")
+    argument = parser.parse_args()
+ 
+    if argument.addr:
+        HOST = argument.addr
+    else
+        sys.argv[1]
+
+
+     if argument.update_period:
+        period = argument.update_period
+    else
+        sys.argv[2]
+
+    if argument.startup_commands:
+        filename = argument.startup_commands
+    else if sys.argv[3]:
+        filename = sys.argv[3]
+    else:
+        filename = ""
+
+    return host, period, filename
 
 def main():
     global DVTable
-    #graph_comment global graph
     t_start = time.time()
-    param = sys.argv[1:] 
-    PORT = 55151
-    HOST = param[0]
-    period = param[1]
-    DVTable = [[HOST,0,HOST]]
-#graph_comment     graph = defaultdict(dict)
 
-    if(len(param) > 2):#Startup
-        filename = param[2]
+
+
+    HOST, period, filename = parse_args()
+    PORT = 55151
+    DVTable = [[HOST,0,HOST, HOST]]
+
+    # Se foi informado um arquivo de startup, lemos ele.
+    if filename:
         file = open(filename,"r")
         for line in file:
             executeCommand(line, sourceIP)
-    #starting threads
+
     threading.Thread(target=CLI, args=(HOST,)).start()
     threading.Timer(int(period),broadcastDV, args=(int(period),PORT)).start()
     threading.Thread(target=listen, args=(HOST,PORT)).start()
-    threading.Thread(target=remove_rotas_desatualizadas, args=(period,)).start()
+   # threading.Thread(target=remove_rotas_desatualizadas, args=(period,)).start()
 
     
 #python3 router.py 127.0.0.1 5 file.txt
