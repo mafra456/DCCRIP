@@ -131,7 +131,7 @@ def executeCommand(line, sourceIP):
 
 
 
-def broadcastDV(HOST, TOUT, PORT): #Envia mensagem do tipo update de tempos em tempos
+def broadcastDistances(HOST, TOUT, PORT): #Envia mensagem do tipo update de tempos em tempos
     global ips
     broadcast = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, 0)
     lock.acquire()
@@ -151,7 +151,7 @@ def broadcastDV(HOST, TOUT, PORT): #Envia mensagem do tipo update de tempos em t
         print("Distances: {}".format(distances))
         broadcast.sendto(updateMessage(host, _broadcastDestination, distances), (_broadcastDestination, PORT))
         
-    threading.Timer(int(TOUT),broadcastDV, args=(HOST, int(TOUT),PORT)).start()
+    threading.Timer(int(TOUT),broadcastDistances, args=(HOST, int(TOUT),PORT)).start()
     lock.release()
     broadcast.close()
 
@@ -221,7 +221,7 @@ def CLI(sourceIP):
         os._exit(1)
 
 
-def remove_rotas_desatualizadas(period):
+def removeRotasDesatualizadas(period):
     global ips
 
     while True:
@@ -280,9 +280,9 @@ def main():
             executeCommand(line, sourceIP)
 
     threading.Thread(target=CLI, args=(HOST,)).start()
-    threading.Timer(int(period),broadcastDV, args=(HOST, period, PORT)).start()
+    threading.Timer(int(period),broadcastDistances, args=(HOST, period, PORT)).start()
     threading.Thread(target=listen, args=(HOST,PORT)).start()
-    threading.Thread(target=remove_rotas_desatualizadas, args=(period,)).start()
+    threading.Thread(target=removeRotasDesatualizadas, args=(period,)).start()
 
     
 #python3 router.py 127.0.0.1 5 file.txt
