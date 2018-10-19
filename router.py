@@ -11,133 +11,153 @@ import argparse
 from collections import defaultdict
 
 lock = threading.Lock()
-global DVTable
 
-def _add(sourceIP, cost, dest, nextStep):
-    global DVTable
+ips = defaultdict()
+global myIP
 
-    # Mantemos essa variável p sermos capazes de identificar rotas desatualizadas.
-    _record_updated_at = int(round(time.time()))
+class Path:
+    def __init__(self, cost, nextStep, updatedAt):
+        self.cost = cost
+        self.nextStep = nextStep
+        self.updatedAt = int(round(time.time()))
 
-    cost = int(cost)
-    DVTable.append([sourceIP, cost, dest, nextStep, _record_updated_at])
-    # Só adicionamos na oposta caso o destino seja igual ao próximo passo.
-    # Nesse caso, é uma ligação direta e sabemos q o caminho inverso é o melhor para o outro.
-    #if(nextStep == dest):
-    #    DVTable.append([dest, cost, sourceIP, sourceIP, _record_updated_at])
 
-    print(DVTable)
+ def updateMessage(source,dest,distances):
+    message = {'type':'update', 'source':source, 'destination':dest, 'distances':distances}
+    update_message = json.dumps(message)
+    print(update_message)
+    return update_message.encode('latin1')
 
-def _del(args, sourceIP):
-    global DVTable
-    dest = args[0]
-    for i in range(len(DVTable)):
-        if(DVTable[i][2] == dest):
-            #DVTable.remove([sourceIP,DVTable[i][1],dest])
-            del DVTable[i]
+def dataMessage(source, dest, traceMessage):
 
-def _trace(args):#Enviam mensagem to tipo data e trace
-    global DVTable
-    print('')
+    message = {'type':'data', 'source':source, 'destination':dest, 'payload': json.dumps(traceMessage)}
+    data_message = json.dumps(message)
+    #print(data_message)
+    return data_message.encode('latin1')
+
+def encodeTraceMessage(source, dest, hops):
+    message = {'type':'trace', 'source':source, 'destination':dest, 'hops': hops}
+    trace_message = json.dumps(message)
+    print("trace_message: {}".format(trace_message))
+    return trace_message.encode('latin1')
+
+def decodeTraceMessage(message):
+    jsonMessage = json.loads(message.decode('latin1'))
+    _type = jsonMessage["type"]
+    _source = jsonMessage["source"]
+    _destination = jsonMessage["destination"]
+    _hops = jsonMessage["hops"]
+
+    return _type, _source, _destination, _hops
+
+# Recebemos um comando de adicionar enlace do CLI
+def _add(cost, dest, nextStep):
+    global ips
+
+    # Se é um destino novo no nosso dicionario de ips, criamos nossa lista
+    if dest not in ips:
+        ips[dest] = []
+
+    # Deletamos os caminhos redundantes do nosso histórico, afinal eles não existem mais.
+    for idx, path in enumerate(ips[dest]):
+        if path.nextStep == nextStep:
+            del ips[dest][idx]
+
+
+    ips[dest].insert(0, new Path(int(cost), nextStep))
+
+# Recebemos um comando de deletar enlace do CLI
+def _del(dest):
+    global ips
+    # Deletamos todos os enlaces virtuais (ou seja, o nextStep é o próprio destino)
+    for idx, path in enumerate(ips[dest]):
+        if(path.nextStep == dest):
+            del ips[dest][idx]
+
+# Recebemos um comando de trace do CLI
+def _trace(sourceIP, dest):
+    global ips
+    _message = encodeTraceMessage(sourceIP, dest, [sourceIP])
+
+    _socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, 0)
+    _socket.sendto(_message, (dest, 55151))
+    _socket.close()
+
+def handleTrace(message):
+    global myIP
+
+    _type, _source, _destination, _hops = decodeTraceMessage(message)
+
+    # Adicionamos nosso IP ao final do hops
+    _hops.append(myIP)
+    _traceMessage = {'type':'trace', 'source':_source, 'destination': _destination, 'hops': _hops}
+
+    # Verificamos se somos o destino do trace
+    if _destination == myIP:
+        _traceSource = _source
+        _dataMessage = dataMessage(myIP, _traceSource, _traceMessage)
+
+        nextDestination = _traceSource
+        nextMessage = _dataMessage
+
+    else:
+    # Se não somos, enviamos o trace para o próximo passo
+    #todo balanceamento de carga
+        nextDestination = ips[_destination][0].nextStep
+        nextMessage = _traceMessage
+
+    _socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, 0)
+    _socket.sendto(nextMessage, (nextDestination, 55151))
+    _socket.close()
+
+
+
 
 def executeCommand(line, sourceIP):
     commands = line.split(" ")
     args = commands[1:]
     if(commands[0] == "add"):
         # Source, custo, destino, next step.
-        _add(sourceIP, args[1], args[0], args[0])
+        dest, cost = args[0], args[1]
+        _add(cost, dest, dest)
     elif(commands[0] == "del"):
-        _del(args,sourceIP)
+        dest = args[0]
+        _del(dest)
     elif(commands[0] == "trace"):
-        _trace(args)
+        dest = args[0]
+        _trace(sourceIP, dest)
     else:
         print("Comando nao reconhecido, tente novamente com [add, del, trace]")
 
-def updateMessage(source,dest,distances):
-    message = {'type':'update', 'source':source, 'destination':dest, 'distances':distances}
-    update_message = json.dumps(message)
-    #print(update_message)
-    return update_message.encode('latin1')
 
-def dataMessage(source,dest):
-    message = {'type':'data', 'source':source, 'destination':dest, 'payload':'data'+'\\'+ source + '\\' + dest}
-    data_message = json.dumps(message)
-    #print(data_message)
-    return data_message.encode('latin1')
 
-def traceMessage():
-    #Falta implementar o hops
-    hops = []
-    message = {'type':'trace', 'source':source, 'destination':dest, 'hops':hops}
-    trace_message = json.dumps(message)
-    #print(trace_message)
-    return trace_message.encode('latin1')
-
-def broadcastDV(TOUT,PORT): #Envia mensagem do tipo update de tempos em tempos
-    global DVTable
+def broadcastDV(HOST, TOUT, PORT): #Envia mensagem do tipo update de tempos em tempos
+    global ips
     broadcast = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, 0)
     lock.acquire()
 
-    # Crio minha tabela de distancias
-#    distances = {dist[2]:dist[1] for dist in DVTable}
+    for _broadcastDestination in ips:
+        _currentTime = int(round(time.time()))
 
-    # Crio e envio tabela todos os meus vizinhos
-    for _broadcastSource, _cost, _broadcastDestination, _nextStep in DVTable: 
-        # Não incluímos rotas para _broadcastDestination nem rotas que tem ela como next step. Split Horizon.
-        distances = [vizinho[2]:vizinho[1] for line in DVTable if vizinho[2] != _broadcastDestination && vizinho[3] != _broadcastDestination]
-        # TODO TEST.
+        # Split Horizon: Criamos a lista de distancias excluindo os caminhos para nosso destinatário
+        # e os caminhos que tem ele como next step.
+        distances = [{destino:paths[0].cost} 
+        for destino, paths in ips.items() 
+        if path[0].nextStep != _broadcastDestination 
+        and destino != _broadcastDestination 
+        and _currentTime - path[0].updatedAt < TOUT*4]
+
+
         print("Distances: {}".format(distances))
-        broadcast.sendto(updateMessage(_broadcastSource, _broadcastDestination, distances), (_broadcastDestination, PORT))
-    threading.Timer(int(TOUT),broadcastDV, args=(int(TOUT),PORT)).start()
+        broadcast.sendto(updateMessage(host, _broadcastDestination, distances), (_broadcastDestination, PORT))
+        
+    threading.Timer(int(TOUT),broadcastDV, args=(HOST, int(TOUT),PORT)).start()
     lock.release()
     broadcast.close()
 
-def createDVTable(HOST):
-    global DVTable
-    DVTable = []
-    return DVTable, HOST
-
-def pathCost(sourceIP, dest):
-    #bellmanFord algorithm
-
-# !!!  Essa função só deve ser utilizada entre nós vizinhos.
-def getCustoVizinho(source, dest):
-    global DVTable
-    for _source, _cost, _dest, _nextStep in DVTable:
-        if source == _source && dest == _dest:
-            return _cost 
-
-def getNextStep(source, dest):
-    global DVTable
-    for _source, _cost, _dest, _nextStep in DVTable:
-        if source == _source && dest == _dest:
-            return _nextStep 
-
-def getTableLine(source, dest):
-    global DVTable
-    for idx, line in enumerate(DVTable):
-        _source, _cost, _dest, _nextStep = line
-        if(_source == source && _dest == dest):
-            return DVTable[idx]
-
-def updatePath(source, newCost, dest, newNextStep):
-    global DVTable
-    for idx, line in enumerate(DVTable):
-        _source, _cost, _dest, _nextStep = line
-        if(_source == source && _dest == dest):
-            _current_time_in_seconds = int(round(time.time()))
-            DVTable[idx] = [source, newCost, dest, newNextStep, _current_time_in_seconds]
-
-def bellmanFord():
-    print('')
-
-
-# Recebemos o anuncio`1             
+# Recebemos o anuncio             
 def receive_update(js):
-    global DVTable
-
-    # Os vizinhos deste roteador
-    _meus_vizinhos = np.array(DVTable)[:,2]
+    global ips
 
     # Anunciante
     _anunciante = js["source"]
@@ -148,29 +168,24 @@ def receive_update(js):
     # Endereços conectados no anunciante
     _distances = js["distances"]
 
-    _custo_vizinho_anunciante = getCustoVizinho(_receiver, _anunciante)
-    
+    _custoVizinhoAnunciante = ips[_anunciante][0].cost
 
-    print("Receiver: {} Anunciante: {} Custo Vizinho Anunciante: {}".format(_receiver, _anunciante, _custo_vizinho_anunciante))
+    print("Receiver: {} Anunciante: {} Custo Vizinho Anunciante: {}".format(_receiver, _anunciante, _custoVizinhoAnunciante))
     # Para cada vizinho no anuncio recebido
-    for destino, custo in _distances.items():
-        if(destino not in _meus_vizinhos):
+    for destinoAnunciado, custoAnunciado in _distances.items():
+        if(destinoAnunciado not in ips):
             # Destino não está na tabela
-            _add(_receiver, _custo_vizinho_anunciante + custo, destino, _anunciante)
+            _add(_custoVizinhoAnunciante + custo, destinoAnunciado, _anunciante)
         else:
-            _linha_receiver_destino = getTableLine(_receiver, destino)
-             _custo_atual = _linha_receiver_destino[1]
-            _nextStep_destino = _linha_receiver_destino[3]
-
-            # Vale a pena atualizar o destino?
-            if(_custo_vizinho_anunciante + custo  < _custo_atual):
-                updatePath(_receiver, _custo_vizinho_anunciante + custo, destino, _anunciante)
+            _linkAtual = ips[dest][0]
+    
+            # O novo caminho é melhor do que o atual?
+            if(_custoVizinhoAnunciante + custoAnunciado  < _linkAtual.cost):
+                _add(_custoVizinhoAnunciante + custo, destinoAnunciado, _anunciante)
             else:
                 # Se o próximo passo para o destino já é o anunciante, atualizamos para o valor recebido
-                if(_nextStep_destino == _anunciante):
-                    updatePath(_receiver, _custo_vizinho_anunciante + custo, destino, _anunciante)
-
-
+                if(_linkAtual.nextStep == _anunciante):
+                    _add(_custoVizinhoAnunciante + custo, destinoAnunciado, _anunciante)
 
 def listen(HOST,PORT):
 
@@ -188,7 +203,7 @@ def listen(HOST,PORT):
         elif(_type == 'data'):
             pass
         elif(_type == 'trace'):
-            pass
+            handleTrace()
          
 
 def CLI(sourceIP):
@@ -206,16 +221,15 @@ def CLI(sourceIP):
         os._exit(1)
 
 
-'''
 def remove_rotas_desatualizadas(period):
+    global ips
+
     while True:
-        global DVTable
-        for idx, line in enumerate(DVTable):
-            _record_updated_at = line[4]
-            _current_time_in_seconds = int(round(time.time()))
-            if _record_updated_at - _current_time_in_seconds > (period * 4):
-                del DVTable[idx]
-'''
+        for idxIp, ip in enumerate(ips):
+            for idxPath, path in enumerate(ip):
+                _currentTime = int(round(time.time()))
+                if path.updatedAt - _currentTime > (period * 4):
+                    del ips[idxIp][idxPath]
 
 
 
@@ -245,17 +259,19 @@ def parse_args():
     else:
         filename = ""
 
-    return host, period, filename
+    return host, int(period), filename
 
 def main():
-    global DVTable
+    global ips, myIP
     t_start = time.time()
 
 
 
     HOST, period, filename = parse_args()
     PORT = 55151
-    DVTable = [[HOST,0,HOST, HOST]]
+    myIP = HOST
+
+    _add(0, HOST, HOST)
 
     # Se foi informado um arquivo de startup, lemos ele.
     if filename:
@@ -264,9 +280,9 @@ def main():
             executeCommand(line, sourceIP)
 
     threading.Thread(target=CLI, args=(HOST,)).start()
-    threading.Timer(int(period),broadcastDV, args=(int(period),PORT)).start()
+    threading.Timer(int(period),broadcastDV, args=(HOST, period, PORT)).start()
     threading.Thread(target=listen, args=(HOST,PORT)).start()
-   # threading.Thread(target=remove_rotas_desatualizadas, args=(period,)).start()
+    threading.Thread(target=remove_rotas_desatualizadas, args=(period,)).start()
 
     
 #python3 router.py 127.0.0.1 5 file.txt
