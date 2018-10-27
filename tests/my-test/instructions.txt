@@ -1,0 +1,3 @@
+cd ~/Documents/redes/tp2/DCCRIP/tests/my-test && python3 ../../router.py 127.0.1.1 5 1.txt
+cd ~/Documents/redes/tp2/DCCRIP/tests/my-test && python3 ../../router.py 127.0.1.2 5 2.txt
+cd ~/Documents/redes/tp2/DCCRIP/tests/my-test && python3 ../../router.py 127.0.1.5 5 5.txt
