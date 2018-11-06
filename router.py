@@ -27,9 +27,10 @@ class Path(object):
 lock = threading.Lock()
 
 ips = defaultdict()
+imediateNeighbors = defaultdict()
 global myIP
 global TOUT
-global imediateNeighbors
+
 
 def refresh_path(dest, cost, nextStep):
     for idx, path in enumerate(ips[dest]):
@@ -59,7 +60,7 @@ def errorMessage(source, dest, errorFoundAtRouter, hops):
 def encodeTraceMessage(source, dest, hops):
     message = {'type':'trace', 'source':source, 'destination':dest, 'hops': hops}
     trace_message = json.dumps(message)
-    print("\ntrace_message: {}".format(trace_message))
+    #LOG print("\ntrace_message: {}".format(trace_message))
     return trace_message.encode('latin1')
 
 def decodeTraceMessage(message):
@@ -92,7 +93,6 @@ def _add(cost, dest, nextStep):
     ips[dest].insert(0, Path(int(cost), nextStep))
 
     #LOG print("Inserindo caminho para {} via {}".format(dest, nextStep))
-
 def dumpIps():
     print('\n\n\n–––––––– {}'.format(int(round(time.time()))))
 
@@ -101,6 +101,7 @@ def dumpIps():
         print(ip)
         for path in ips[ip]:
             print("    Cost: {} Next Step: {} UpdatedAt: {} LastUsedAt: {}".format(path.cost, path.nextStep, path.updatedAt, path.LastUsedAt))
+
 # Recebemos um comando de deletar enlace do CLI
 def _del(dest):
     global ips
@@ -115,19 +116,19 @@ def _trace(dest):
     _message = encodeTraceMessage(myIP, dest, [myIP])
     
     if(dest not in ips):
-        print("\n1 -ERRO PATH_NOT_FOUND: Caminho não encontrado para {}".format(dest))
+        print("\nERRO PATH_NOT_FOUND: Caminho não encontrado para {}".format(dest))
     else:
         nextStep = findNextStep(dest)
 
         # Se encontramos um nextStep para encaminhar nosso trace, podemos prosseguir
         if(nextStep != math.inf):
-            print("\nMensagem de Trace enviada para {} com destino a {}".format(nextStep, dest))
+            #LOG print("\nMensagem de Trace enviada para {} com destino a {}".format(nextStep, dest))
             _socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, 0)
             _socket.sendto(_message, (nextStep, 55151))
             _socket.close()
         else:
             #LOG EXTRA: Se não, enviamos uma mensagem para a origem (nós mesmos) dizendo que não existe caminho
-            print("\n2- ERRO PATH_NOT_FOUND: Caminho não encontrado para {}".format(dest))
+            print("\nERRO PATH_NOT_FOUND: Caminho não encontrado para {}".format(dest))
 
 
 
@@ -145,10 +146,17 @@ def findNextStep(dest):
     nextStepPathIdx = math.inf
     minLastUsedAt = math.inf
 
+    minCost = math.inf
     #pdb.set_trace()
 
+
+    # Nesses dois fors, pegamos as rotas com o menor custo.
     for pathIdx, path in enumerate(ips[dest]): 
-        if _validTime(path):
+        if path.cost < minCost:
+            minCost = path.cost
+
+    for pathIdx, path in enumerate(ips[dest]): 
+        if path.cost <= minCost:
             possiblePaths.append([pathIdx, path])
 
    
@@ -184,7 +192,7 @@ def handleTrace(message):
 
         nextDestination = _traceSource
         nextMessage = _dataMessage
-        print("\nMensagem de Data enviada para {}".format(nextDestination))
+        #LOG print("\nMensagem de Data enviada para {}".format(nextDestination))
 
 
     else:
@@ -219,7 +227,8 @@ def executeCommand(line):
     if(command == "add"):
         # Source, custo, destino, next step.
         dest, cost = args[0], args[1]
-        imediateNeighbors.append(dest)
+        # Salvamos o vizinho imediato com o tempo de atualização
+        imediateNeighbors[dest] = int(round(time.time()))
         _add(cost, dest, dest)
     elif(command == "del"):
         dest = args[0]
@@ -229,8 +238,8 @@ def executeCommand(line):
         _trace(dest)
     elif(command == "dump"):
         dumpIps()
-    else:
-        print("\n{}: Comando nao reconhecido, tente novamente com [add, del, trace]".format(command))
+    #else:
+    #    print("\n{}: Comando nao reconhecido, tente novamente com [add, del, trace]".format(command))
 
 
 
@@ -242,21 +251,11 @@ def sendDistances(TOUT, PORT): #Envia mensagem do tipo update de tempos em tempo
     _socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, 0)
     lock.acquire()
 
-    #if myIP == "127.0.1.1":
-        #pdb.set_trace()
-
-    for _imediateNeighbor in imediateNeighbors:
+    for _imediateNeighbor, _neighborUpdatedAt in imediateNeighbors.items():
 
         _currentTime = int(round(time.time()))
 
         distances = []
-
-        '''
-        TODO Se eu não ouço de um vizinho em pi * 4, removo tudo que tem ele como next Step
-
-
-
-        '''
 
         # Split Horizon: Criamos a lista de distancias excluindo os caminhos para nosso destinatário
         # e os caminhos que tem ele como next step.
@@ -278,9 +277,6 @@ def sendDistances(TOUT, PORT): #Envia mensagem do tipo update de tempos em tempo
 
             distances.append({destino:paths[0].cost}) 
 
-        #pdb.set_trace()
-        #if(_imediateNeighbor == "127.0.1.3"):
-        # LOG print("\nDistances to {}: {}".format(_imediateNeighbor, distances))
         _socket.sendto(updateMessage(myIP, _imediateNeighbor, distances), (_imediateNeighbor, PORT))
         
     threading.Timer(int(TOUT),sendDistances, args=(int(TOUT),PORT)).start()
@@ -306,7 +302,7 @@ def delete_non_updated_paths(neighbor):
         for idx_path, path in enumerate(paths):
             # Não deletamos um caminho direto, por isso a 3a condicao do if
             if(path.nextStep == neighbor and path.updated == False and ip != neighbor):
-                print("Deletando caminho para {} via {}".format(ip, path.nextStep))
+                #print("Deletando caminho para {} via {}".format(ip, path.nextStep))
                 del ips[ip][idx_path]
 
 
@@ -319,28 +315,19 @@ def update_direct_path(neighbor):
 
 # Recebemos o anuncio             
 def receive_update(js):
-    global ips
+    global ips, imediateNeighbors
 
-    # Anunciante
     _anunciante = js["source"]
-
-    # Eu
     _receiver = js["destination"]
-
-    # Endereços conectados no anunciante
     _distances = js["distances"]
-
-    #pdb.set_trace()
     _custoVizinhoAnunciante = ips[_anunciante][0].cost
 
-
+    imediateNeighbors[_anunciante] = int(round(time.time()))
     # Atualizamos o updatedAt do caminho direto para o anunciante
     update_direct_path(_anunciante)
 
     # Marcamos todos os caminhos como não atualizados. Assim conseguiremos manter um registro de quais foram recebidos agora.
     mark_paths_as_non_updated(_anunciante)
-
-    #LOG ?print("\nReceiver: {} Anunciante: {} Custo Vizinho Anunciante: {}".format(_receiver, _anunciante, _custoVizinhoAnunciante))
 
     # Para cada vizinho no anuncio recebido
     for _distance in _distances:
@@ -349,19 +336,24 @@ def receive_update(js):
                 # Destino não está na tabela
                 _add(_custoVizinhoAnunciante + custoAnunciado, destinoAnunciado, _anunciante)
             else:
-                # Já existe um link para este destino anunciado
-                _linkAtual = ips[destinoAnunciado][0]
-        
-                # O novo caminho é melhor do que o atual?
-                if(_custoVizinhoAnunciante + custoAnunciado  < _linkAtual.cost):
+                _pathsCount = len(ips[destinoAnunciado])
+                # Talvez o ip esteja na tabela, mas sem nenhum caminho. Nesse caso simplesmente adicionamos ele.
+                if(_pathsCount == 0):
                     _add(_custoVizinhoAnunciante + custoAnunciado, destinoAnunciado, _anunciante)
                 else:
-                    # Se o próximo passo para o destino já é o anunciante, atualizamos para o valor recebido
-                    if(_linkAtual.nextStep == _anunciante):
+                    # Já existe um link para este destino anunciado
+                    _linkAtual = ips[destinoAnunciado][0]
+            
+                    # O novo caminho é melhor do que o atual?
+                    if(_custoVizinhoAnunciante + custoAnunciado  < _linkAtual.cost):
                         _add(_custoVizinhoAnunciante + custoAnunciado, destinoAnunciado, _anunciante)
-                    elif(_custoVizinhoAnunciante + custoAnunciado  == _linkAtual.cost):
-                        # Neste caso temos uma rota alternativa
-                        _add(_custoVizinhoAnunciante + custoAnunciado, destinoAnunciado, _anunciante)
+                    else:
+                        # Se o próximo passo para o destino já é o anunciante, atualizamos para o valor recebido
+                        if(_linkAtual.nextStep == _anunciante):
+                            _add(_custoVizinhoAnunciante + custoAnunciado, destinoAnunciado, _anunciante)
+                        elif(_custoVizinhoAnunciante + custoAnunciado  == _linkAtual.cost):
+                            # Neste caso temos uma rota alternativa. Matemos isso pelo reroteamento imediato.
+                            _add(_custoVizinhoAnunciante + custoAnunciado, destinoAnunciado, _anunciante)
                    
     
     # Deletamos todos os caminhos que não foram atualizados, ou seja, não existem mais
@@ -382,14 +374,14 @@ def listen(HOST,PORT):
             receive_update(js)
             
         elif(_type == 'data'):
-            print("\n Received {} From {}".format(js["type"], js["source"]))
+            #print("\n Received {} From {}".format(js["type"], js["source"]))
             print(js)
             pass
         elif(_type == 'trace'):
-            print("\n Received {} From {}".format(js["type"], js["source"]))
+            #print("\n Received {} From {}".format(js["type"], js["source"]))
             handleTrace(message)
         elif(_type == 'error'):
-            print("\n{} \n Hops: {}".format(js["payload"], js["hops"]))
+            #print("\n{} \n Hops: {}".format(js["payload"], js["hops"]))
             handleTrace(message)
          
 
@@ -408,14 +400,22 @@ def CLI():
         os._exit(1)
 
 
-def removeRotasDesatualizadas(period):
-    global ips, myIP
+def removeRotasDesatualizadas(TOUT):
+    global ips, myIP, imediateNeighbors
 
     while True:
+        oldNeighbors = []
+        _currentTime = int(round(time.time()))
+
+        # Checa pela última vez que recebemos uma atualização de um vizinho imediato
+        for _imediateNeighbor, _neighborUpdatedAt in imediateNeighbors.items():
+            if _currentTime - _neighborUpdatedAt >= (TOUT * 4):
+                oldNeighbors.append(_imediateNeighbor)
+        
+        # Apagamos todas as rotas que tem esse vizinho como próximo passo
         for ip in ips.copy():
             for idxPath, path in enumerate(ips[ip]):
-                _currentTime = int(round(time.time()))
-                if _currentTime - path.updatedAt > (period * 4) and ip != myIP:
+                if path.nextStep in oldNeighbors:
                     del ips[ip][idxPath]
 
 
@@ -456,9 +456,8 @@ def main():
     t_start = time.time()
 
 
-    imediateNeighbors = [] 
     HOST, TOUT, filename = parse_args()
-    print("Router Iniciado {}".format(HOST))
+    print(HOST)
     PORT = 55151
     myIP = HOST
 
@@ -472,7 +471,7 @@ def main():
     threading.Thread(target=CLI, args=()).start()
     threading.Timer(int(TOUT),sendDistances, args=(TOUT, PORT)).start()
     threading.Thread(target=listen, args=(HOST,PORT)).start()
-    #threading.Thread(target=removeRotasDesatualizadas, args=(TOUT,)).start()
+    threading.Thread(target=removeRotasDesatualizadas, args=(TOUT,)).start()
 
     
 #python3 router.py 127.0.1.1 5 input.txt
