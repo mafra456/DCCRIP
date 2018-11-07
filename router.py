@@ -209,7 +209,7 @@ def handleTrace(message):
             nextMessage = _traceMessage
             nextMessage = json.dumps(nextMessage)
             nextMessage = nextMessage.encode('latin1')
-            print("\nMensagem de Trace re-enviada para {}".format(nextDestination))
+            #print("\nMensagem de Trace re-enviada para {}".format(nextDestination))
 
 
     
@@ -391,12 +391,12 @@ def CLI():
         while(True):
             line = input()
             if(line == "quit"):
-                print("\nTermino da Execucao")
+                #print("\nTermino da Execucao")
                 os._exit(1)
             else:
                 executeCommand(line)
     except KeyboardInterrupt:
-        print("\nTermino da Execucao")
+        #print("\nTermino da Execucao")
         os._exit(1)
 
 
@@ -457,7 +457,7 @@ def main():
 
 
     HOST, TOUT, filename = parse_args()
-    print(HOST)
+    #print(HOST)
     PORT = 55151
     myIP = HOST
 
